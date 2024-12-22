@@ -342,32 +342,6 @@ func (svr *Service) Run(ctx context.Context) {
 		}()
 	}
 
-	// 处理 SSH 隧道监听器
-	go svr.HandleListener(svr.sshTunnelListener, true)
-
-	// 如果 KCP 监听器不为空，则处理 KCP 监听器
-	if svr.kcpListener != nil {
-		go svr.HandleListener(svr.kcpListener, false)
-	}
-	// 如果 QUIC 监听器不为空，则处理 QUIC 监听器
-	if svr.quicListener != nil {
-		go svr.HandleQUICListener(svr.quicListener)
-	}
-	// 处理 WebSocket 监听器
-	go svr.HandleListener(svr.websocketListener, false)
-	// 处理 TLS 监听器
-	go svr.HandleListener(svr.tlsListener, false)
-
-	// 如果 NAT 穿洞控制器不为空，则启动清理工作协程
-	if svr.rc.NatHoleController != nil {
-		go svr.rc.NatHoleController.CleanWorker(svr.ctx)
-	}
-
-	// 如果 SSH 隧道网关不为空，则运行 SSH 隧道网关
-	if svr.sshTunnelGateway != nil {
-		go svr.sshTunnelGateway.Run()
-	}
-
 	// 处理主监听器
 	svr.HandleListener(svr.listener, false)
 

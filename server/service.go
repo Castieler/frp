@@ -79,8 +79,6 @@ type Service struct {
 
 	pxyManager *proxy.Manager // 管理所有代理
 
-	pluginManager *plugin.Manager // 管理所有插件
-
 	httpVhostRouter *vhost.Routers // HTTP 虚拟主机路由器
 
 	rc *controller.ResourceController // 所有资源管理器和控制器
@@ -123,9 +121,8 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 	}
 
 	svr := &Service{
-		ctlManager:    NewControlManager(), // 创建新的控制管理器
-		pxyManager:    proxy.NewManager(),  // 创建新的代理管理器
-		pluginManager: plugin.NewManager(), // 创建新的插件管理器
+		ctlManager: NewControlManager(), // 创建新的控制管理器
+		pxyManager: proxy.NewManager(),  // 创建新的代理管理器
 		rc: &controller.ResourceController{
 			VisitorManager: visitor.NewManager(),                                       // 创建新的访客管理器
 			TCPPortManager: ports.NewManager("tcp", cfg.ProxyBindAddr, cfg.AllowPorts), // 创建新的 TCP 端口管理器
@@ -476,7 +473,7 @@ func (svr *Service) RegisterControl(ctlConn net.Conn, loginMsg *msg.Login, inter
 	}
 
 	// TODO: 使用 SessionContext
-	ctl, err := NewControl(ctx, svr.rc, svr.pxyManager, svr.pluginManager, authVerifier, ctlConn, !internal, loginMsg, svr.cfg)
+	ctl, err := NewControl(ctx, svr.rc, svr.pxyManager, authVerifier, ctlConn, !internal, loginMsg, svr.cfg)
 	if err != nil {
 		xl.Warnf("create new controller error: %v", err) // 记录警告日志
 		// 不要向客户端返回详细错误
@@ -516,12 +513,10 @@ func (svr *Service) RegisterWorkConn(workConn net.Conn, newMsg *msg.NewWorkConn)
 		},
 		NewWorkConn: *newMsg,
 	}
-	retContent, err := svr.pluginManager.NewWorkConn(content)
-	if err == nil {
-		newMsg = &retContent.NewWorkConn
-		// 检查身份验证
-		err = ctl.authVerifier.VerifyNewWorkConn(newMsg)
-	}
+
+	newMsg = &content.NewWorkConn
+	// 检查身份验证
+	err := ctl.authVerifier.VerifyNewWorkConn(newMsg)
 	if err != nil {
 		xl.Warnf("invalid NewWorkConn with run id [%s]", newMsg.RunID) // 记录警告日志
 		_ = msg.WriteMsg(workConn, &msg.StartWorkConn{

@@ -163,7 +163,6 @@ func NewControl(
 	ctx context.Context, // 上下文，用于控制生命周期
 	rc *controller.ResourceController, // 资源控制器
 	pxyManager *proxy.Manager, // 代理管理器
-	pluginManager *plugin.Manager, // 插件管理器
 	authVerifier auth.Verifier, // 验证器，用于身份验证
 	ctlConn net.Conn, // 控制连接
 	ctlConnEncrypted bool, // 控制连接是否加密
@@ -175,21 +174,20 @@ func NewControl(
 		poolCount = int(serverCfg.Transport.MaxPoolCount) // 限制连接池数量
 	}
 	ctl := &Control{
-		rc:            rc,                                // 初始化资源控制器
-		pxyManager:    pxyManager,                        // 初始化代理管理器
-		pluginManager: pluginManager,                     // 初始化插件管理器
-		authVerifier:  authVerifier,                      // 初始化验证器
-		conn:          ctlConn,                           // 初始化控制连接
-		loginMsg:      loginMsg,                          // 初始化登录消息
-		workConnCh:    make(chan net.Conn, poolCount+10), // 创建工作连接通道，容量为连接池数量加10
-		proxies:       make(map[string]proxy.Proxy),      // 初始化代理映射
-		poolCount:     poolCount,                         // 设置连接池数量
-		portsUsedNum:  0,                                 // 初始化已使用端口数量
-		runID:         loginMsg.RunID,                    // 设置运行ID
-		serverCfg:     serverCfg,                         // 设置服务器配置
-		xl:            xlog.FromContextSafe(ctx),         // 从上下文中获取日志记录器
-		ctx:           ctx,                               // 设置上下文
-		doneCh:        make(chan struct{}),               // 创建关闭通道
+		rc:           rc,                                // 初始化资源控制器
+		pxyManager:   pxyManager,                        // 初始化代理管理器
+		authVerifier: authVerifier,                      // 初始化验证器
+		conn:         ctlConn,                           // 初始化控制连接
+		loginMsg:     loginMsg,                          // 初始化登录消息
+		workConnCh:   make(chan net.Conn, poolCount+10), // 创建工作连接通道，容量为连接池数量加10
+		proxies:      make(map[string]proxy.Proxy),      // 初始化代理映射
+		poolCount:    poolCount,                         // 设置连接池数量
+		portsUsedNum: 0,                                 // 初始化已使用端口数量
+		runID:        loginMsg.RunID,                    // 设置运行ID
+		serverCfg:    serverCfg,                         // 设置服务器配置
+		xl:           xlog.FromContextSafe(ctx),         // 从上下文中获取日志记录器
+		ctx:          ctx,                               // 设置上下文
+		doneCh:       make(chan struct{}),               // 创建关闭通道
 	}
 	ctl.lastPing.Store(time.Now()) // 存储当前时间为上次Ping时间
 
@@ -343,20 +341,6 @@ func (ctl *Control) worker() {
 		pxy.Close()
 		ctl.pxyManager.Del(pxy.GetName())                                                  // 从管理器中删除代理
 		metrics.Server.CloseProxy(pxy.GetName(), pxy.GetConfigurer().GetBaseConfig().Type) // 更新指标
-
-		notifyContent := &plugin.CloseProxyContent{ // 创建关闭代理通知内容
-			User: plugin.UserInfo{
-				User:  ctl.loginMsg.User,
-				Metas: ctl.loginMsg.Metas,
-				RunID: ctl.loginMsg.RunID,
-			},
-			CloseProxy: msg.CloseProxy{
-				ProxyName: pxy.GetName(),
-			},
-		}
-		go func() {
-			_ = ctl.pluginManager.CloseProxy(notifyContent) // 通知插件关闭代理
-		}()
 	}
 
 	metrics.Server.CloseClient()    // 关闭客户端指标
@@ -385,11 +369,9 @@ func (ctl *Control) handleNewProxy(m msg.Message) {
 		NewProxy: *inMsg,
 	}
 	var remoteAddr string
-	retContent, err := ctl.pluginManager.NewProxy(content) // 调用插件管理器处理新代理
-	if err == nil {
-		inMsg = &retContent.NewProxy
-		remoteAddr, err = ctl.RegisterProxy(inMsg) // 注册代理
-	}
+
+	inMsg = &content.NewProxy
+	remoteAddr, err := ctl.RegisterProxy(inMsg) // 注册代理
 
 	resp := &msg.NewProxyResp{ // 创建新代理响应
 		ProxyName: inMsg.ProxyName,

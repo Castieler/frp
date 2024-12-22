@@ -1,4 +1,6 @@
 bindPort: 7001
+transport:
+  heartbeatTimeout: 10
 log:
   to: console
   level: trace

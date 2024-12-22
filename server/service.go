@@ -314,11 +314,8 @@ func (svr *Service) handleConnection(ctx context.Context, conn net.Conn, interna
 			Login:         *m,
 			ClientAddress: conn.RemoteAddr().String(),
 		}
-		retContent, err := svr.pluginManager.Login(content)
-		if err == nil {
-			m = &retContent.Login
-			err = svr.RegisterControl(conn, m, internal) // 注册控制连接
-		}
+		m = &content.Login
+		err = svr.RegisterControl(conn, m, internal) // 注册控制连接
 
 		// 如果登录失败，发送错误消息
 		// 否则在控制的工作协程中发送成功消息

@@ -16,7 +16,7 @@
 
 package system
 
-// EnableCompatibilityMode enables compatibility mode for different system.
-// For example, on Android, the inability to obtain the correct time zone will result in incorrect log time output.
+// EnableCompatibilityMode 启用不同系统的兼容模式。
+// 例如，在 Android 上，由于无法获取正确的时区，可能会导致日志时间输出不正确。
 func EnableCompatibilityMode() {
 }

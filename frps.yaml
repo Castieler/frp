@@ -1,0 +1,20 @@
+bindPort: 7001
+log:
+  to: console
+  level: trace
+auth:
+  token: "12345678901"
+  method: "token"
+#  additionalScopes:
+#    - "HeartBeats"
+#    - "NewWorkConns"
+#httpPlugins:
+#  - name: "http"
+#    addr: "127.0.0.1:7200"
+#    path: "/handler"
+#    ops:
+#      - "Login"
+#      - "NewWorkConn"
+#      - "NewProxy"
+#      - "NewUserConn"
+#      - "Ping"

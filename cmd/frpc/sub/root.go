@@ -36,36 +36,38 @@ import (
 )
 
 var (
-	cfgFile          string
-	cfgDir           string
-	showVersion      bool
-	strictConfigMode bool
+	cfgFile          string // 配置文件路径
+	cfgDir           string // 配置目录路径
+	showVersion      bool   // 是否显示版本信息
+	strictConfigMode bool   // 严格配置模式，未知字段将导致错误
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "./frpc.ini", "config file of frpc")
-	rootCmd.PersistentFlags().StringVarP(&cfgDir, "config_dir", "", "", "config directory, run one frpc service for each file in config directory")
-	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "version of frpc")
-	rootCmd.PersistentFlags().BoolVarP(&strictConfigMode, "strict_config", "", true, "strict config parsing mode, unknown fields will cause an errors")
+	// 初始化命令行标志
+	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "./frpc.ini", "frpc的配置文件")
+	rootCmd.PersistentFlags().StringVarP(&cfgDir, "config_dir", "", "", "配置目录，为配置目录中的每个文件运行一个frpc服务")
+	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "frpc的版本")
+	rootCmd.PersistentFlags().BoolVarP(&strictConfigMode, "strict_config", "", true, "严格配置解析模式，未知字段将导致错误")
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "frpc",
-	Short: "frpc is the client of frp (https://github.com/fatedier/frp)",
+	Use:   "frpc",                                           // 命令的使用方法
+	Short: "frpc是frp的客户端 (https://github.com/fatedier/frp)", // 命令的简短描述
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if showVersion {
+			// 如果需要显示版本信息，打印版本并返回
 			fmt.Println(version.Full())
 			return nil
 		}
 
-		// If cfgDir is not empty, run multiple frpc service for each config file in cfgDir.
-		// Note that it's only designed for testing. It's not guaranteed to be stable.
+		// 如果cfgDir不为空，为cfgDir中的每个配置文件运行多个frpc服务
+		// 注意，这仅用于测试，不能保证稳定性
 		if cfgDir != "" {
 			_ = runMultipleClients(cfgDir)
 			return nil
 		}
 
-		// Do not show command usage here.
+		// 不显示命令用法
 		err := runClient(cfgFile)
 		if err != nil {
 			fmt.Println(err)
@@ -77,57 +79,63 @@ var rootCmd = &cobra.Command{
 
 func runMultipleClients(cfgDir string) error {
 	var wg sync.WaitGroup
+	// 遍历配置目录中的每个文件
 	err := filepath.WalkDir(cfgDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
-			return nil
+			return nil // 如果是目录或出错，跳过
 		}
 		wg.Add(1)
-		time.Sleep(time.Millisecond)
+		time.Sleep(time.Millisecond) // 短暂休眠
 		go func() {
 			defer wg.Done()
-			err := runClient(path)
+			err := runClient(path) // 为每个配置文件运行客户端
 			if err != nil {
-				fmt.Printf("frpc service error for config file [%s]\n", path)
+				fmt.Printf("配置文件 [%s] 的frpc服务出错\n", path)
 			}
 		}()
 		return nil
 	})
-	wg.Wait()
+	wg.Wait() // 等待所有goroutine完成
 	return err
 }
 
 func Execute() {
+	// 设置全局命令规范化函数
 	rootCmd.SetGlobalNormalizationFunc(config.WordSepNormalizeFunc)
 	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+		os.Exit(1) // 如果执行出错，退出程序
 	}
 }
 
 func handleTermSignal(svr *client.Service) {
 	ch := make(chan os.Signal, 1)
+	// 监听系统中断信号
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	<-ch
+	// 优雅关闭服务
 	svr.GracefulClose(500 * time.Millisecond)
 }
 
 func runClient(cfgFilePath string) error {
+	// 加载客户端配置
 	cfg, proxyCfgs, visitorCfgs, isLegacyFormat, err := config.LoadClientConfig(cfgFilePath, strictConfigMode)
 	if err != nil {
 		return err
 	}
 	if isLegacyFormat {
-		fmt.Printf("WARNING: ini format is deprecated and the support will be removed in the future, " +
-			"please use yaml/json/toml format instead!\n")
+		// 如果是旧格式，打印警告
+		fmt.Printf("警告: ini格式已弃用，未来将移除支持，请使用yaml/json/toml格式！\n")
 	}
 
+	// 验证所有客户端配置
 	warning, err := validation.ValidateAllClientConfig(cfg, proxyCfgs, visitorCfgs)
 	if warning != nil {
-		fmt.Printf("WARNING: %v\n", warning)
+		fmt.Printf("警告: %v\n", warning)
 	}
 	if err != nil {
 		return err
 	}
-	return startService(cfg, proxyCfgs, visitorCfgs, cfgFilePath)
+	return startService(cfg, proxyCfgs, visitorCfgs, cfgFilePath) // 启动服务
 }
 
 func startService(
@@ -136,11 +144,13 @@ func startService(
 	visitorCfgs []v1.VisitorConfigurer,
 	cfgFile string,
 ) error {
+	// 初始化日志
 	log.InitLogger(cfg.Log.To, cfg.Log.Level, int(cfg.Log.MaxDays), cfg.Log.DisablePrintColor)
 
 	if cfgFile != "" {
-		log.Infof("start frpc service for config file [%s]", cfgFile)
-		defer log.Infof("frpc service for config file [%s] stopped", cfgFile)
+		// 记录服务启动和停止日志
+		log.Infof("启动配置文件 [%s] 的frpc服务", cfgFile)
+		defer log.Infof("配置文件 [%s] 的frpc服务已停止", cfgFile)
 	}
 	svr, err := client.NewService(client.ServiceOptions{
 		Common:         cfg,
@@ -152,10 +162,10 @@ func startService(
 		return err
 	}
 
+	// 如果使用kcp或quic协议，捕获退出信号
 	shouldGracefulClose := cfg.Transport.Protocol == "kcp" || cfg.Transport.Protocol == "quic"
-	// Capture the exit signal if we use kcp or quic.
 	if shouldGracefulClose {
 		go handleTermSignal(svr)
 	}
-	return svr.Run(context.Background())
+	return svr.Run(context.Background()) // 运行服务
 }

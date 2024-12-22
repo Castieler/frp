@@ -43,114 +43,122 @@ import (
 )
 
 type ControlManager struct {
-	// controls indexed by run id
+	// 通过运行ID索引的控制对象
 	ctlsByRunID map[string]*Control
 
+	// 读写锁，用于保护ctlsByRunID的并发访问
 	mu sync.RWMutex
 }
 
+// 创建一个新的ControlManager实例
 func NewControlManager() *ControlManager {
 	return &ControlManager{
 		ctlsByRunID: make(map[string]*Control),
 	}
 }
 
+// 添加一个Control对象到管理器中
 func (cm *ControlManager) Add(runID string, ctl *Control) (old *Control) {
-	cm.mu.Lock()
+	cm.mu.Lock() // 加锁以保护共享资源
 	defer cm.mu.Unlock()
 
 	var ok bool
-	old, ok = cm.ctlsByRunID[runID]
+	old, ok = cm.ctlsByRunID[runID] // 检查是否已有相同runID的Control
 	if ok {
-		old.Replaced(ctl)
+		old.Replaced(ctl) // 如果存在，替换旧的Control
 	}
-	cm.ctlsByRunID[runID] = ctl
+	cm.ctlsByRunID[runID] = ctl // 添加新的Control
 	return
 }
 
-// we should make sure if it's the same control to prevent delete a new one
+// 删除一个Control对象，确保是同一个Control才删除
 func (cm *ControlManager) Del(runID string, ctl *Control) {
-	cm.mu.Lock()
+	cm.mu.Lock() // 加锁以保护共享资源
 	defer cm.mu.Unlock()
 	if c, ok := cm.ctlsByRunID[runID]; ok && c == ctl {
-		delete(cm.ctlsByRunID, runID)
+		delete(cm.ctlsByRunID, runID) // 删除Control
 	}
 }
 
+// 根据运行ID获取Control对象
 func (cm *ControlManager) GetByID(runID string) (ctl *Control, ok bool) {
-	cm.mu.RLock()
+	cm.mu.RLock() // 读锁以保护共享资源
 	defer cm.mu.RUnlock()
 	ctl, ok = cm.ctlsByRunID[runID]
 	return
 }
 
+// 关闭所有Control对象
 func (cm *ControlManager) Close() error {
-	cm.mu.Lock()
+	cm.mu.Lock() // 加锁以保护共享资源
 	defer cm.mu.Unlock()
 	for _, ctl := range cm.ctlsByRunID {
-		ctl.Close()
+		ctl.Close() // 关闭每个Control
 	}
-	cm.ctlsByRunID = make(map[string]*Control)
+	cm.ctlsByRunID = make(map[string]*Control) // 清空map
 	return nil
 }
 
 type Control struct {
-	// all resource managers and controllers
+	// 资源控制器
 	rc *controller.ResourceController
 
-	// proxy manager
+	// 代理管理器
 	pxyManager *proxy.Manager
 
-	// plugin manager
+	// 插件管理器
 	pluginManager *plugin.Manager
 
-	// verifies authentication based on selected method
+	// 验证器，用于验证身份认证
 	authVerifier auth.Verifier
 
-	// other components can use this to communicate with client
+	// 用于与客户端通信的消息传输器
 	msgTransporter transport.MessageTransporter
 
-	// msgDispatcher is a wrapper for control connection.
-	// It provides a channel for sending messages, and you can register handlers to process messages based on their respective types.
+	// 消息分发器，用于处理不同类型的消息
 	msgDispatcher *msg.Dispatcher
 
-	// login message
+	// 登录消息
 	loginMsg *msg.Login
 
-	// control connection
+	// 控制连接
 	conn net.Conn
 
-	// work connections
+	// 工作连接通道
 	workConnCh chan net.Conn
 
-	// proxies in one client
+	// 客户端中的代理
 	proxies map[string]proxy.Proxy
 
-	// pool count
+	// 连接池数量
 	poolCount int
 
-	// ports used, for limitations
+	// 使用的端口数量
 	portsUsedNum int
 
-	// last time got the Ping message
+	// 上次接收到Ping消息的时间
 	lastPing atomic.Value
 
-	// A new run id will be generated when a new client login.
-	// If run id got from login message has same run id, it means it's the same client, so we can
-	// replace old controller instantly.
+	// 运行ID，用于标识客户端
 	runID string
 
+	// 读写锁，用于保护共享资源
 	mu sync.RWMutex
 
-	// Server configuration information
+	// 服务器配置
 	serverCfg *v1.ServerConfig
 
-	xl     *xlog.Logger
-	ctx    context.Context
+	// 日志记录器
+	xl *xlog.Logger
+
+	// 上下文
+	ctx context.Context
+
+	// 关闭通道
 	doneCh chan struct{}
 }
 
-// TODO(fatedier): Referencing the implementation of frpc, encapsulate the input parameters as SessionContext.
+// 创建一个新的Control实例
 func NewControl(
 	ctx context.Context,
 	rc *controller.ResourceController,
@@ -164,7 +172,7 @@ func NewControl(
 ) (*Control, error) {
 	poolCount := loginMsg.PoolCount
 	if poolCount > int(serverCfg.Transport.MaxPoolCount) {
-		poolCount = int(serverCfg.Transport.MaxPoolCount)
+		poolCount = int(serverCfg.Transport.MaxPoolCount) // 限制连接池数量
 	}
 	ctl := &Control{
 		rc:            rc,
@@ -173,7 +181,7 @@ func NewControl(
 		authVerifier:  authVerifier,
 		conn:          ctlConn,
 		loginMsg:      loginMsg,
-		workConnCh:    make(chan net.Conn, poolCount+10),
+		workConnCh:    make(chan net.Conn, poolCount+10), // 创建工作连接通道
 		proxies:       make(map[string]proxy.Proxy),
 		poolCount:     poolCount,
 		portsUsedNum:  0,
@@ -183,119 +191,116 @@ func NewControl(
 		ctx:           ctx,
 		doneCh:        make(chan struct{}),
 	}
-	ctl.lastPing.Store(time.Now())
+	ctl.lastPing.Store(time.Now()) // 存储当前时间为上次Ping时间
 
 	if ctlConnEncrypted {
 		cryptoRW, err := netpkg.NewCryptoReadWriter(ctl.conn, []byte(ctl.serverCfg.Auth.Token))
 		if err != nil {
-			return nil, err
+			return nil, err // 如果加密失败，返回错误
 		}
-		ctl.msgDispatcher = msg.NewDispatcher(cryptoRW)
+		ctl.msgDispatcher = msg.NewDispatcher(cryptoRW) // 使用加密连接创建消息分发器
 	} else {
-		ctl.msgDispatcher = msg.NewDispatcher(ctl.conn)
+		ctl.msgDispatcher = msg.NewDispatcher(ctl.conn) // 使用普通连接创建消息分发器
 	}
-	ctl.registerMsgHandlers()
-	ctl.msgTransporter = transport.NewMessageTransporter(ctl.msgDispatcher.SendChannel())
+	ctl.registerMsgHandlers()                                                             // 注册消息处理器
+	ctl.msgTransporter = transport.NewMessageTransporter(ctl.msgDispatcher.SendChannel()) // 创建消息传输器
 	return ctl, nil
 }
 
-// Start send a login success message to client and start working.
+// 向客户端发送登录成功消息并开始工作
 func (ctl *Control) Start() {
 	loginRespMsg := &msg.LoginResp{
 		Version: version.Full(),
 		RunID:   ctl.runID,
 		Error:   "",
 	}
-	_ = msg.WriteMsg(ctl.conn, loginRespMsg)
+	_ = msg.WriteMsg(ctl.conn, loginRespMsg) // 发送登录响应消息
 
 	go func() {
 		for i := 0; i < ctl.poolCount; i++ {
-			// ignore error here, that means that this control is closed
-			_ = ctl.msgDispatcher.Send(&msg.ReqWorkConn{})
+			_ = ctl.msgDispatcher.Send(&msg.ReqWorkConn{}) // 请求工作连接
 		}
 	}()
-	go ctl.worker()
+	go ctl.worker() // 启动工作协程
 }
 
+// 关闭控制连接
 func (ctl *Control) Close() error {
 	ctl.conn.Close()
 	return nil
 }
 
+// 替换旧的Control对象
 func (ctl *Control) Replaced(newCtl *Control) {
 	xl := ctl.xl
-	xl.Infof("Replaced by client [%s]", newCtl.runID)
+	xl.Infof("Replaced by client [%s]", newCtl.runID) // 记录替换日志
 	ctl.runID = ""
-	ctl.conn.Close()
+	ctl.conn.Close() // 关闭连接
 }
 
+// 注册工作连接
 func (ctl *Control) RegisterWorkConn(conn net.Conn) error {
 	xl := ctl.xl
 	defer func() {
 		if err := recover(); err != nil {
-			xl.Errorf("panic error: %v", err)
+			xl.Errorf("panic error: %v", err) // 捕获并记录panic错误
 			xl.Errorf(string(debug.Stack()))
 		}
 	}()
 
 	select {
-	case ctl.workConnCh <- conn:
+	case ctl.workConnCh <- conn: // 将连接放入工作连接通道
 		xl.Debugf("new work connection registered")
 		return nil
 	default:
-		xl.Debugf("work connection pool is full, discarding")
+		xl.Debugf("work connection pool is full, discarding") // 如果通道已满，丢弃连接
 		return fmt.Errorf("work connection pool is full, discarding")
 	}
 }
 
-// When frps get one user connection, we get one work connection from the pool and return it.
-// If no workConn available in the pool, send message to frpc to get one or more
-// and wait until it is available.
-// return an error if wait timeout
+// 获取工作连接
 func (ctl *Control) GetWorkConn() (workConn net.Conn, err error) {
 	xl := ctl.xl
 	defer func() {
 		if err := recover(); err != nil {
-			xl.Errorf("panic error: %v", err)
+			xl.Errorf("panic error: %v", err) // 捕获并记录panic错误
 			xl.Errorf(string(debug.Stack()))
 		}
 	}()
 
 	var ok bool
-	// get a work connection from the pool
 	select {
-	case workConn, ok = <-ctl.workConnCh:
+	case workConn, ok = <-ctl.workConnCh: // 从工作连接通道获取连接
 		if !ok {
 			err = pkgerr.ErrCtlClosed
 			return
 		}
 		xl.Debugf("get work connection from pool")
 	default:
-		// no work connections available in the poll, send message to frpc to get more
-		if err := ctl.msgDispatcher.Send(&msg.ReqWorkConn{}); err != nil {
+		if err := ctl.msgDispatcher.Send(&msg.ReqWorkConn{}); err != nil { // 请求更多工作连接
 			return nil, fmt.Errorf("control is already closed")
 		}
 
 		select {
-		case workConn, ok = <-ctl.workConnCh:
+		case workConn, ok = <-ctl.workConnCh: // 再次尝试获取连接
 			if !ok {
 				err = pkgerr.ErrCtlClosed
 				xl.Warnf("no work connections available, %v", err)
 				return
 			}
 
-		case <-time.After(time.Duration(ctl.serverCfg.UserConnTimeout) * time.Second):
+		case <-time.After(time.Duration(ctl.serverCfg.UserConnTimeout) * time.Second): // 超时处理
 			err = fmt.Errorf("timeout trying to get work connection")
 			xl.Warnf("%v", err)
 			return
 		}
 	}
 
-	// When we get a work connection from pool, replace it with a new one.
-	_ = ctl.msgDispatcher.Send(&msg.ReqWorkConn{})
+	_ = ctl.msgDispatcher.Send(&msg.ReqWorkConn{}) // 获取到连接后请求新的连接
 	return
 }
 
+// 心跳检测工作协程
 func (ctl *Control) heartbeatWorker() {
 	if ctl.serverCfg.Transport.HeartbeatTimeout <= 0 {
 		return
@@ -304,37 +309,38 @@ func (ctl *Control) heartbeatWorker() {
 	xl := ctl.xl
 	go wait.Until(func() {
 		if time.Since(ctl.lastPing.Load().(time.Time)) > time.Duration(ctl.serverCfg.Transport.HeartbeatTimeout)*time.Second {
-			xl.Warnf("heartbeat timeout")
+			xl.Warnf("heartbeat timeout") // 心跳超时处理
 			ctl.conn.Close()
 			return
 		}
 	}, time.Second, ctl.doneCh)
 }
 
-// block until Control closed
+// 阻塞直到Control关闭
 func (ctl *Control) WaitClosed() {
 	<-ctl.doneCh
 }
 
+// 工作协程
 func (ctl *Control) worker() {
 	xl := ctl.xl
 
-	go ctl.heartbeatWorker()
-	go ctl.msgDispatcher.Run()
+	go ctl.heartbeatWorker()   // 启动心跳检测
+	go ctl.msgDispatcher.Run() // 启动消息分发器
 
-	<-ctl.msgDispatcher.Done()
+	<-ctl.msgDispatcher.Done() // 等待消息分发器完成
 	ctl.conn.Close()
 
 	ctl.mu.Lock()
 	defer ctl.mu.Unlock()
 
-	close(ctl.workConnCh)
+	close(ctl.workConnCh) // 关闭工作连接通道
 	for workConn := range ctl.workConnCh {
 		workConn.Close()
 	}
 
 	for _, pxy := range ctl.proxies {
-		pxy.Close()
+		pxy.Close() // 关闭代理
 		ctl.pxyManager.Del(pxy.GetName())
 		metrics.Server.CloseProxy(pxy.GetName(), pxy.GetConfigurer().GetBaseConfig().Type)
 
@@ -349,24 +355,26 @@ func (ctl *Control) worker() {
 			},
 		}
 		go func() {
-			_ = ctl.pluginManager.CloseProxy(notifyContent)
+			_ = ctl.pluginManager.CloseProxy(notifyContent) // 通知插件关闭代理
 		}()
 	}
 
-	metrics.Server.CloseClient()
+	metrics.Server.CloseClient() // 关闭客户端
 	xl.Infof("client exit success")
-	close(ctl.doneCh)
+	close(ctl.doneCh) // 关闭完成通道
 }
 
+// 注册消息处理器
 func (ctl *Control) registerMsgHandlers() {
-	ctl.msgDispatcher.RegisterHandler(&msg.NewProxy{}, ctl.handleNewProxy)
-	ctl.msgDispatcher.RegisterHandler(&msg.Ping{}, ctl.handlePing)
-	ctl.msgDispatcher.RegisterHandler(&msg.NatHoleVisitor{}, msg.AsyncHandler(ctl.handleNatHoleVisitor))
-	ctl.msgDispatcher.RegisterHandler(&msg.NatHoleClient{}, msg.AsyncHandler(ctl.handleNatHoleClient))
-	ctl.msgDispatcher.RegisterHandler(&msg.NatHoleReport{}, msg.AsyncHandler(ctl.handleNatHoleReport))
-	ctl.msgDispatcher.RegisterHandler(&msg.CloseProxy{}, ctl.handleCloseProxy)
+	ctl.msgDispatcher.RegisterHandler(&msg.NewProxy{}, ctl.handleNewProxy)                               // 注册新代理处理器
+	ctl.msgDispatcher.RegisterHandler(&msg.Ping{}, ctl.handlePing)                                       // 注册Ping处理器
+	ctl.msgDispatcher.RegisterHandler(&msg.NatHoleVisitor{}, msg.AsyncHandler(ctl.handleNatHoleVisitor)) // 注册NAT洞访客处理器
+	ctl.msgDispatcher.RegisterHandler(&msg.NatHoleClient{}, msg.AsyncHandler(ctl.handleNatHoleClient))   // 注册NAT洞客户端处理器
+	ctl.msgDispatcher.RegisterHandler(&msg.NatHoleReport{}, msg.AsyncHandler(ctl.handleNatHoleReport))   // 注册NAT洞报告处理器
+	ctl.msgDispatcher.RegisterHandler(&msg.CloseProxy{}, ctl.handleCloseProxy)                           // 注册关闭代理处理器
 }
 
+// 处理新代理消息
 func (ctl *Control) handleNewProxy(m msg.Message) {
 	xl := ctl.xl
 	inMsg := m.(*msg.NewProxy)
@@ -383,10 +391,9 @@ func (ctl *Control) handleNewProxy(m msg.Message) {
 	retContent, err := ctl.pluginManager.NewProxy(content)
 	if err == nil {
 		inMsg = &retContent.NewProxy
-		remoteAddr, err = ctl.RegisterProxy(inMsg)
+		remoteAddr, err = ctl.RegisterProxy(inMsg) // 注册代理
 	}
 
-	// register proxy in this control
 	resp := &msg.NewProxyResp{
 		ProxyName: inMsg.ProxyName,
 	}
@@ -399,9 +406,10 @@ func (ctl *Control) handleNewProxy(m msg.Message) {
 		xl.Infof("new proxy [%s] type [%s] success", inMsg.ProxyName, inMsg.ProxyType)
 		metrics.Server.NewProxy(inMsg.ProxyName, inMsg.ProxyType)
 	}
-	_ = ctl.msgDispatcher.Send(resp)
+	_ = ctl.msgDispatcher.Send(resp) // 发送响应
 }
 
+// 处理Ping消息
 func (ctl *Control) handlePing(m msg.Message) {
 	xl := ctl.xl
 	inMsg := m.(*msg.Ping)
@@ -417,7 +425,7 @@ func (ctl *Control) handlePing(m msg.Message) {
 	retContent, err := ctl.pluginManager.Ping(content)
 	if err == nil {
 		inMsg = &retContent.Ping
-		err = ctl.authVerifier.VerifyPing(inMsg)
+		err = ctl.authVerifier.VerifyPing(inMsg) // 验证Ping消息
 	}
 	if err != nil {
 		xl.Warnf("received invalid ping: %v", err)
@@ -426,50 +434,51 @@ func (ctl *Control) handlePing(m msg.Message) {
 		})
 		return
 	}
-	ctl.lastPing.Store(time.Now())
+	ctl.lastPing.Store(time.Now()) // 更新上次Ping时间
 	xl.Debugf("receive heartbeat")
-	_ = ctl.msgDispatcher.Send(&msg.Pong{})
+	_ = ctl.msgDispatcher.Send(&msg.Pong{}) // 发送Pong响应
 }
 
+// 处理NAT洞访客消息
 func (ctl *Control) handleNatHoleVisitor(m msg.Message) {
 	inMsg := m.(*msg.NatHoleVisitor)
-	ctl.rc.NatHoleController.HandleVisitor(inMsg, ctl.msgTransporter, ctl.loginMsg.User)
+	ctl.rc.NatHoleController.HandleVisitor(inMsg, ctl.msgTransporter, ctl.loginMsg.User) // 处理访客
 }
 
+// 处理NAT洞客户端消息
 func (ctl *Control) handleNatHoleClient(m msg.Message) {
 	inMsg := m.(*msg.NatHoleClient)
-	ctl.rc.NatHoleController.HandleClient(inMsg, ctl.msgTransporter)
+	ctl.rc.NatHoleController.HandleClient(inMsg, ctl.msgTransporter) // 处理客户端
 }
 
+// 处理NAT洞报告消息
 func (ctl *Control) handleNatHoleReport(m msg.Message) {
 	inMsg := m.(*msg.NatHoleReport)
-	ctl.rc.NatHoleController.HandleReport(inMsg)
+	ctl.rc.NatHoleController.HandleReport(inMsg) // 处理报告
 }
 
+// 处理关闭代理消息
 func (ctl *Control) handleCloseProxy(m msg.Message) {
 	xl := ctl.xl
 	inMsg := m.(*msg.CloseProxy)
-	_ = ctl.CloseProxy(inMsg)
+	_ = ctl.CloseProxy(inMsg) // 关闭代理
 	xl.Infof("close proxy [%s] success", inMsg.ProxyName)
 }
 
+// 注册代理
 func (ctl *Control) RegisterProxy(pxyMsg *msg.NewProxy) (remoteAddr string, err error) {
 	var pxyConf v1.ProxyConfigurer
-	// Load configures from NewProxy message and validate.
-	pxyConf, err = config.NewProxyConfigurerFromMsg(pxyMsg, ctl.serverCfg)
+	pxyConf, err = config.NewProxyConfigurerFromMsg(pxyMsg, ctl.serverCfg) // 从消息中加载配置
 	if err != nil {
 		return
 	}
 
-	// User info
 	userInfo := plugin.UserInfo{
 		User:  ctl.loginMsg.User,
 		Metas: ctl.loginMsg.Metas,
 		RunID: ctl.runID,
 	}
 
-	// NewProxy will return an interface Proxy.
-	// In fact, it creates different proxies based on the proxy type. We just call run() here.
 	pxy, err := proxy.NewProxy(ctl.ctx, &proxy.Options{
 		UserInfo:           userInfo,
 		LoginMsg:           ctl.loginMsg,
@@ -483,7 +492,6 @@ func (ctl *Control) RegisterProxy(pxyMsg *msg.NewProxy) (remoteAddr string, err 
 		return remoteAddr, err
 	}
 
-	// Check ports used number in each client
 	if ctl.serverCfg.MaxPortsPerClient > 0 {
 		ctl.mu.Lock()
 		if ctl.portsUsedNum+pxy.GetUsedPortsNum() > int(ctl.serverCfg.MaxPortsPerClient) {
@@ -508,7 +516,7 @@ func (ctl *Control) RegisterProxy(pxyMsg *msg.NewProxy) (remoteAddr string, err 
 		return
 	}
 
-	remoteAddr, err = pxy.Run()
+	remoteAddr, err = pxy.Run() // 运行代理
 	if err != nil {
 		return
 	}
@@ -518,17 +526,18 @@ func (ctl *Control) RegisterProxy(pxyMsg *msg.NewProxy) (remoteAddr string, err 
 		}
 	}()
 
-	err = ctl.pxyManager.Add(pxyMsg.ProxyName, pxy)
+	err = ctl.pxyManager.Add(pxyMsg.ProxyName, pxy) // 添加代理到管理器
 	if err != nil {
 		return
 	}
 
 	ctl.mu.Lock()
-	ctl.proxies[pxy.GetName()] = pxy
+	ctl.proxies[pxy.GetName()] = pxy // 将代理添加到Control
 	ctl.mu.Unlock()
 	return
 }
 
+// 关闭代理
 func (ctl *Control) CloseProxy(closeMsg *msg.CloseProxy) (err error) {
 	ctl.mu.Lock()
 	pxy, ok := ctl.proxies[closeMsg.ProxyName]
@@ -540,7 +549,7 @@ func (ctl *Control) CloseProxy(closeMsg *msg.CloseProxy) (err error) {
 	if ctl.serverCfg.MaxPortsPerClient > 0 {
 		ctl.portsUsedNum -= pxy.GetUsedPortsNum()
 	}
-	pxy.Close()
+	pxy.Close() // 关闭代理
 	ctl.pxyManager.Del(pxy.GetName())
 	delete(ctl.proxies, closeMsg.ProxyName)
 	ctl.mu.Unlock()
@@ -558,7 +567,7 @@ func (ctl *Control) CloseProxy(closeMsg *msg.CloseProxy) (err error) {
 		},
 	}
 	go func() {
-		_ = ctl.pluginManager.CloseProxy(notifyContent)
+		_ = ctl.pluginManager.CloseProxy(notifyContent) // 通知插件关闭代理
 	}()
 	return
 }

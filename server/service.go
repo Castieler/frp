@@ -35,7 +35,6 @@ import (
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 	modelmetrics "github.com/fatedier/frp/pkg/metrics"
 	"github.com/fatedier/frp/pkg/msg"
-	"github.com/fatedier/frp/pkg/nathole"
 	plugin "github.com/fatedier/frp/pkg/plugin/server"
 	"github.com/fatedier/frp/pkg/ssh"
 	"github.com/fatedier/frp/pkg/transport"
@@ -255,13 +254,7 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 			return nil, fmt.Errorf("create vhost httpsMuxer error, %v", err) // 如果创建虚拟主机 httpsMuxer 失败，返回错误
 		}
 	}
-
-	// 创建 nat hole 控制器
-	nc, err := nathole.NewController(time.Duration(cfg.NatHoleAnalysisDataReserveHours) * time.Hour)
-	if err != nil {
-		return nil, fmt.Errorf("create nat hole controller error, %v", err) // 如果创建 nat hole 控制器失败，返回错误
-	}
-	svr.rc.NatHoleController = nc
+	
 	return svr, nil
 }
 

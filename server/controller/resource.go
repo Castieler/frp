@@ -15,7 +15,6 @@
 package controller
 
 import (
-	"github.com/fatedier/frp/pkg/nathole"
 	plugin "github.com/fatedier/frp/pkg/plugin/server"
 	"github.com/fatedier/frp/pkg/util/tcpmux"
 	"github.com/fatedier/frp/pkg/util/vhost"
@@ -49,9 +48,6 @@ type ResourceController struct {
 
 	// For HTTPS proxies, route requests to different clients by hostname and other information
 	VhostHTTPSMuxer *vhost.HTTPSMuxer
-
-	// Controller for nat hole connections
-	NatHoleController *nathole.Controller
 
 	// TCPMux HTTP CONNECT multiplexer
 	TCPMuxHTTPConnectMuxer *tcpmux.HTTPConnectTCPMuxer

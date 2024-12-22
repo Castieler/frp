@@ -366,12 +366,9 @@ func (ctl *Control) worker() {
 
 // 注册消息处理器
 func (ctl *Control) registerMsgHandlers() {
-	ctl.msgDispatcher.RegisterHandler(&msg.NewProxy{}, ctl.handleNewProxy)                               // 注册新代理处理器
-	ctl.msgDispatcher.RegisterHandler(&msg.Ping{}, ctl.handlePing)                                       // 注册Ping处理器
-	ctl.msgDispatcher.RegisterHandler(&msg.NatHoleVisitor{}, msg.AsyncHandler(ctl.handleNatHoleVisitor)) // 注册NAT洞访客处理器
-	ctl.msgDispatcher.RegisterHandler(&msg.NatHoleClient{}, msg.AsyncHandler(ctl.handleNatHoleClient))   // 注册NAT洞客户端处理器
-	ctl.msgDispatcher.RegisterHandler(&msg.NatHoleReport{}, msg.AsyncHandler(ctl.handleNatHoleReport))   // 注册NAT洞报告处理器
-	ctl.msgDispatcher.RegisterHandler(&msg.CloseProxy{}, ctl.handleCloseProxy)                           // 注册关闭代理处理器
+	ctl.msgDispatcher.RegisterHandler(&msg.NewProxy{}, ctl.handleNewProxy)     // 注册新代理处理器
+	ctl.msgDispatcher.RegisterHandler(&msg.Ping{}, ctl.handlePing)             // 注册Ping处理器
+	ctl.msgDispatcher.RegisterHandler(&msg.CloseProxy{}, ctl.handleCloseProxy) // 注册关闭代理处理器
 }
 
 // 处理新代理消息
@@ -437,24 +434,6 @@ func (ctl *Control) handlePing(m msg.Message) {
 	ctl.lastPing.Store(time.Now()) // 更新上次Ping时间
 	xl.Debugf("receive heartbeat")
 	_ = ctl.msgDispatcher.Send(&msg.Pong{}) // 发送Pong响应
-}
-
-// 处理NAT洞访客消息
-func (ctl *Control) handleNatHoleVisitor(m msg.Message) {
-	inMsg := m.(*msg.NatHoleVisitor)
-	ctl.rc.NatHoleController.HandleVisitor(inMsg, ctl.msgTransporter, ctl.loginMsg.User) // 处理访客
-}
-
-// 处理NAT洞客户端消息
-func (ctl *Control) handleNatHoleClient(m msg.Message) {
-	inMsg := m.(*msg.NatHoleClient)
-	ctl.rc.NatHoleController.HandleClient(inMsg, ctl.msgTransporter) // 处理客户端
-}
-
-// 处理NAT洞报告消息
-func (ctl *Control) handleNatHoleReport(m msg.Message) {
-	inMsg := m.(*msg.NatHoleReport)
-	ctl.rc.NatHoleController.HandleReport(inMsg) // 处理报告
 }
 
 // 处理关闭代理消息

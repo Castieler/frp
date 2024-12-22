@@ -240,19 +240,6 @@ func (pxy *BaseProxy) handleUserTCPConnection(userConn net.Conn) {
 
 	serverCfg := pxy.serverCfg            // 获取服务器配置
 	cfg := pxy.configurer.GetBaseConfig() // 获取基础配置
-	// 服务器插件钩子
-	rc := pxy.GetResourceController()      // 获取资源控制器
-	content := &plugin.NewUserConnContent{ // 创建新的用户连接内容
-		User:       pxy.GetUserInfo(),              // 用户信息
-		ProxyName:  pxy.GetName(),                  // 代理名称
-		ProxyType:  cfg.Type,                       // 代理类型
-		RemoteAddr: userConn.RemoteAddr().String(), // 用户远程地址
-	}
-	_, err := rc.PluginManager.NewUserConn(content) // 调用插件管理器的新用户连接方法
-	if err != nil {                                 // 如果连接被拒绝
-		xl.Warnf("the user conn [%s] was rejected, err:%v", content.RemoteAddr, err) // 记录警告日志
-		return                                                                       // 返回
-	}
 
 	// 尝试从连接池中获取连接
 	workConn, err := pxy.GetWorkConnFromPool(userConn.RemoteAddr(), userConn.LocalAddr()) // 获取工作连接

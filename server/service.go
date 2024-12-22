@@ -158,13 +158,6 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 		log.Infof("tcpmux httpconnect multiplexer listen on %s, passthough: %v", address, cfg.TCPMuxPassthrough)
 	}
 
-	// 初始化所有插件
-	for _, p := range cfg.HTTPPlugins {
-		svr.pluginManager.Register(plugin.NewHTTPPluginOptions(p))
-		log.Infof("plugin [%s] has been registered", p.Name)
-	}
-	svr.rc.PluginManager = svr.pluginManager
-
 	// 初始化组控制器
 	svr.rc.TCPGroupCtl = group.NewTCPGroupCtl(svr.rc.TCPPortManager)
 
@@ -254,7 +247,7 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 			return nil, fmt.Errorf("create vhost httpsMuxer error, %v", err) // 如果创建虚拟主机 httpsMuxer 失败，返回错误
 		}
 	}
-	
+
 	return svr, nil
 }
 

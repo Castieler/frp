@@ -15,7 +15,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -77,16 +76,6 @@ type Service struct {
 
 	listener net.Listener // 接收客户端连接的监听器
 
-	kcpListener net.Listener // 使用 kcp 协议接收连接的监听器
-
-	quicListener *quic.Listener // 使用 quic 协议接收连接的监听器
-
-	websocketListener net.Listener // 使用 websocket 协议接收连接的监听器
-
-	tlsListener net.Listener // 接收 frp tls 连接的监听器
-
-	sshTunnelListener *netpkg.InternalListener // 从 ssh 隧道网关接收管道连接的监听器
-
 	ctlManager *ControlManager // 管理所有控制器
 
 	pxyManager *proxy.Manager // 管理所有代理
@@ -143,13 +132,12 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 			TCPPortManager: ports.NewManager("tcp", cfg.ProxyBindAddr, cfg.AllowPorts), // 创建新的 TCP 端口管理器
 			UDPPortManager: ports.NewManager("udp", cfg.ProxyBindAddr, cfg.AllowPorts), // 创建新的 UDP 端口管理器
 		},
-		sshTunnelListener: netpkg.NewInternalListener(),   // 创建新的��部监听器
-		httpVhostRouter:   vhost.NewRouters(),             // 创建新的虚拟主机路由器
-		authVerifier:      auth.NewAuthVerifier(cfg.Auth), // 创建新的身份验证器
-		webServer:         webServer,                      // 设置 Web 服务器
-		tlsConfig:         tlsConfig,                      // 设置 TLS 配置
-		cfg:               cfg,                            // 设置服务器配置
-		ctx:               context.Background(),           // 创建新的上下文
+		httpVhostRouter: vhost.NewRouters(),             // 创建新的虚拟主机路由器
+		authVerifier:    auth.NewAuthVerifier(cfg.Auth), // 创建新的身份验证器
+		webServer:       webServer,                      // 设置 Web 服务器
+		tlsConfig:       tlsConfig,                      // 设置 TLS 配置
+		cfg:             cfg,                            // 设置服务器配置
+		ctx:             context.Background(),           // 创建新的上下文
 	}
 	if webServer != nil {
 		webServer.RouteRegister(svr.registerRouteHandlers) // 注册路由处理程序
@@ -220,49 +208,6 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 	svr.listener = ln
 	log.Infof("frps tcp listen on %s", address)
 
-	// 使用 kcp 协议监听客户端连接
-	if cfg.KCPBindPort > 0 {
-		address := net.JoinHostPort(cfg.BindAddr, strconv.Itoa(cfg.KCPBindPort))
-		svr.kcpListener, err = netpkg.ListenKcp(address)
-		if err != nil {
-			return nil, fmt.Errorf("listen on kcp udp address %s error: %v", address, err) // 如果监听 kcp 地址失败，返回错误
-		}
-		log.Infof("frps kcp listen on udp %s", address)
-	}
-
-	// 使用 quic 协议监听客户端连接
-	if cfg.QUICBindPort > 0 {
-		address := net.JoinHostPort(cfg.BindAddr, strconv.Itoa(cfg.QUICBindPort))
-		quicTLSCfg := tlsConfig.Clone()
-		quicTLSCfg.NextProtos = []string{"frp"}
-		svr.quicListener, err = quic.ListenAddr(address, quicTLSCfg, &quic.Config{
-			MaxIdleTimeout:     time.Duration(cfg.Transport.QUIC.MaxIdleTimeout) * time.Second,
-			MaxIncomingStreams: int64(cfg.Transport.QUIC.MaxIncomingStreams),
-			KeepAlivePeriod:    time.Duration(cfg.Transport.QUIC.KeepalivePeriod) * time.Second,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("listen on quic udp address %s error: %v", address, err) // 如果监听 quic 地址失败，返回错误
-		}
-		log.Infof("frps quic listen on %s", address)
-	}
-
-	// SSH 隧道网关监听
-	if cfg.SSHTunnelGateway.BindPort > 0 {
-		sshGateway, err := ssh.NewGateway(cfg.SSHTunnelGateway, cfg.ProxyBindAddr, svr.sshTunnelListener)
-		if err != nil {
-			return nil, fmt.Errorf("create ssh gateway error: %v", err) // 如果创建 SSH 网关失败，返回错误
-		}
-		svr.sshTunnelGateway = sshGateway
-		log.Infof("frps sshTunnelGateway listen on port %d", cfg.SSHTunnelGateway.BindPort)
-	}
-
-	// 使用 websocket 协议监听客户端连接
-	websocketPrefix := []byte("GET " + netpkg.FrpWebsocketPath)
-	websocketLn := svr.muxer.Listen(0, uint32(len(websocketPrefix)), func(data []byte) bool {
-		return bytes.Equal(data, websocketPrefix)
-	})
-	svr.websocketListener = netpkg.NewWebsocketListener(websocketLn)
-
 	// 创建 http 虚拟主机多路复用器
 	if cfg.VhostHTTPPort > 0 {
 		rp := vhost.NewHTTPReverseProxy(vhost.HTTPReverseProxyOptions{
@@ -311,12 +256,6 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 		}
 	}
 
-	// frp tls 监听器
-	svr.tlsListener = svr.muxer.Listen(2, 1, func(data []byte) bool {
-		// tls 第一个字节可以是 0x16 仅当虚拟主机 https 端口与绑定端口不同时
-		return int(data[0]) == netpkg.FRPTLSHeadByte || int(data[0]) == 0x16
-	})
-
 	// 创建 nat hole 控制器
 	nc, err := nathole.NewController(time.Duration(cfg.NatHoleAnalysisDataReserveHours) * time.Hour)
 	if err != nil {
@@ -354,22 +293,6 @@ func (svr *Service) Run(ctx context.Context) {
 
 // Close 方法关闭所有监听器和管理器
 func (svr *Service) Close() error {
-	if svr.kcpListener != nil {
-		svr.kcpListener.Close() // 关闭 KCP 监听器
-		svr.kcpListener = nil
-	}
-	if svr.quicListener != nil {
-		svr.quicListener.Close() // 关闭 QUIC 监听器
-		svr.quicListener = nil
-	}
-	if svr.websocketListener != nil {
-		svr.websocketListener.Close() // 关闭 WebSocket 监听器
-		svr.websocketListener = nil
-	}
-	if svr.tlsListener != nil {
-		svr.tlsListener.Close() // 关闭 TLS 监听器
-		svr.tlsConfig = nil
-	}
 	if svr.listener != nil {
 		svr.listener.Close() // 关闭主监听器
 		svr.listener = nil

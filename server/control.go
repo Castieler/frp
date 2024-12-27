@@ -107,7 +107,6 @@ type Control struct {
 	pxyManager *proxy.Manager
 
 	// 插件管理器
-	pluginManager *plugin.Manager
 
 	// 验证器，用于验证身份认证
 	authVerifier auth.Verifier
@@ -401,11 +400,8 @@ func (ctl *Control) handlePing(m msg.Message) {
 		},
 		Ping: *inMsg,
 	}
-	retContent, err := ctl.pluginManager.Ping(content) // 调用插件管理器处理Ping
-	if err == nil {
-		inMsg = &retContent.Ping
-		err = ctl.authVerifier.VerifyPing(inMsg) // 验证Ping消息
-	}
+	inMsg = &content.Ping
+	err := ctl.authVerifier.VerifyPing(inMsg) // 验证Ping消息
 	if err != nil {
 		xl.Warnf("received invalid ping: %v", err) // 记录无效Ping
 		_ = ctl.msgDispatcher.Send(&msg.Pong{
@@ -516,19 +512,5 @@ func (ctl *Control) CloseProxy(closeMsg *msg.CloseProxy) (err error) {
 	ctl.mu.Unlock()
 
 	metrics.Server.CloseProxy(pxy.GetName(), pxy.GetConfigurer().GetBaseConfig().Type) // 更新指标
-
-	notifyContent := &plugin.CloseProxyContent{ // 创建关闭代理通知内容
-		User: plugin.UserInfo{
-			User:  ctl.loginMsg.User,
-			Metas: ctl.loginMsg.Metas,
-			RunID: ctl.loginMsg.RunID,
-		},
-		CloseProxy: msg.CloseProxy{
-			ProxyName: pxy.GetName(),
-		},
-	}
-	go func() {
-		_ = ctl.pluginManager.CloseProxy(notifyContent) // 通知插件关闭代理
-	}()
 	return
 }

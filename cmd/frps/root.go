@@ -46,19 +46,14 @@ var rootCmd = &cobra.Command{
 		}
 
 		var (
-			svrCfg         *v1.ServerConfig // 服务器配置指针
-			isLegacyFormat bool             // 是否为旧格式标志
-			err            error            // 错误信息
+			svrCfg *v1.ServerConfig // 服务器配置指针
+			err    error            // 错误信息
 		)
 		if cfgFile != "" { // 如果指定了配置文件
-			svrCfg, isLegacyFormat, err = config.LoadServerConfig(cfgFile, strictConfigMode) // 加载服务器配置
-			if err != nil {                                                                  // 如果加载出错
+			svrCfg, err = config.LoadServerConfig(cfgFile, strictConfigMode) // 加载服务器配置
+			if err != nil {                                                  // 如果加载出错
 				fmt.Println(err) // 打印错误信息
 				os.Exit(1)       // 退出程序
-			}
-			if isLegacyFormat { // 如果是旧格式
-				fmt.Printf("WARNING: ini format is deprecated and the support will be removed in the future, " +
-					"please use yaml/json/toml format instead!\n") // 打印警告信息
 			}
 		} else { // 如果没有指定配置文件
 			serverCfg.Complete() // 完成默认配置

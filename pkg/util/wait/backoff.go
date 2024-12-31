@@ -69,6 +69,12 @@ func NewFastBackoffManager(options FastBackoffOptions) BackoffManager {
 	}
 }
 
+// 动态调整退避时间：
+//
+// 		根据前一次操作的结果（成功或失败）和连续失败的次数，动态调整下一次重试的等待时间。
+// 		如果操作失败，退避时间会逐渐增加，以避免频繁重试。
+// 		如果操作成功，退避时间会重置为默认值。
+
 // Backoff 方法计算下一个退避时间。
 func (f *fastBackoffImpl) Backoff(previousDuration time.Duration, previousConditionError bool) time.Duration {
 	if f.lastCalledTime.IsZero() { // 如果是第一次调用

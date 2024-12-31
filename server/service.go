@@ -15,6 +15,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -82,6 +83,8 @@ type Service struct {
 	httpVhostRouter *vhost.Routers // HTTP 虚拟主机路由器
 
 	rc *controller.ResourceController // 所有资源管理器和控制器
+
+	websocketListener net.Listener // 使用 websocket 协议接收连接的监听器
 
 	webServer *httppkg.Server // 用于仪表板 UI 和 API 的 Web 服务器
 
@@ -197,6 +200,13 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 	svr.listener = ln
 	log.Infof("frps tcp listen on %s", address)
 
+	// 使用 websocket 协议监听客户端连接
+	websocketPrefix := []byte("GET " + netpkg.FrpWebsocketPath)
+	websocketLn := svr.muxer.Listen(0, uint32(len(websocketPrefix)), func(data []byte) bool {
+		return bytes.Equal(data, websocketPrefix)
+	})
+	svr.websocketListener = netpkg.NewWebsocketListener(websocketLn)
+
 	// 创建 http 虚拟主机多路复用器
 	if cfg.VhostHTTPPort > 0 {
 		rp := vhost.NewHTTPReverseProxy(vhost.HTTPReverseProxyOptions{
@@ -224,7 +234,6 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 		}()
 		log.Infof("http service listen on %s", address)
 	}
-
 	// 创建 https 虚拟主机多路复用器
 	if cfg.VhostHTTPSPort > 0 {
 		var l net.Listener
@@ -263,6 +272,8 @@ func (svr *Service) Run(ctx context.Context) {
 			}
 		}()
 	}
+	// 处理 WebSocket 监听器
+	go svr.HandleListener(svr.websocketListener, false)
 
 	// 处理主监听器
 	svr.HandleListener(svr.listener, false)
